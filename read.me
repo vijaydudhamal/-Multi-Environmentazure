@@ -1,0 +1,92 @@
+🏗️ Multi-Environment Azure Platform (AKS & Key Vault)
+This repository contains the Infrastructure as Code (IaC) for a production-grade, multi-environment Kubernetes platform on Azure. It leverages a modular design to deploy Networking, Security, and Compute resources consistently across Dev, QA, and Prod.
+
+📍 Architecture Overview
+The following diagram illustrates the flow from the Terraform configuration to the final Azure environment.
+
+Code snippet
+
+graph TD
+    subgraph Local_Dev [Local Development]
+        A[Terraform Code] --> B[Environment .tfvars]
+    end
+
+    subgraph Pipeline [CI/CD Pipeline - Azure DevOps]
+        B --> C{Validation & Plan}
+        C -->|Success| D[Manual Approval]
+        D -->|Approved| E[Terraform Apply]
+    end
+
+    subgraph Azure_Cloud [Azure Subscription]
+        E --> F[VNet / Subnet]
+        F --> G[AKS Cluster]
+        E --> H[Key Vault]
+        G -->|Managed Identity| H
+    end
+
+    subgraph Storage [State Management]
+        E <--> I[(Azure Blob Storage)]
+    end
+🛠️ Tech Stack
+IaC: Terraform (v1.7.0+)
+
+Cloud: Azure (Provider v3.0+)
+
+CI/CD: Azure Pipelines & GitHub Actions
+
+Compute: Azure Kubernetes Service (AKS)
+
+Security: Azure Key Vault & RBAC
+
+📂 Directory Structure
+Plaintext
+
+.
+├── .github/workflows/    # GitHub Actions for automated linting
+├── modules/              # Reusable infrastructure blocks
+│   └── network/          # VNet, Subnet, AKS, and Key Vault logic
+├── environments/         # Environment-specific configurations
+│   ├── dev/              # Development (Sandboxed)
+│   ├── qa/               # Quality Assurance (Testing)
+│   └── prod/             # Production (High Availability)
+├── scripts/              # Helper scripts (validate_all.sh)
+└── azure-pipelines.yml   # Main CI/CD orchestration
+🚀 Getting Started
+Prerequisites
+Azure CLI installed and authenticated (az login).
+
+Terraform CLI (v1.7+) installed.
+
+An existing Azure Storage Account for remote state.
+
+Local Deployment (Dev)
+To test changes locally before pushing to the pipeline:
+
+Bash
+
+cd environments/dev
+terraform init
+terraform plan -var-file="terraform.tfvars"
+terraform apply -var-file="terraform.tfvars"
+🛡️ Security Standards
+Identity-Based Access: AKS uses System-Assigned Managed Identity to access Key Vault. No client secrets are stored in the cluster.
+
+Network Isolation: Key Vault is protected by Network ACLs, allowing traffic only from the AKS Subnet.
+
+State Locking: Remote state is stored in Azure Blob Storage with lease-locking enabled to prevent concurrent modification.
+
+Least Privilege: resource_provider_registrations = "none" is used to ensure the deployment identity doesn't require over-privileged subscription-level permissions.
+
+🔄 CI/CD & Drift Detection
+The project includes a 2-step deployment process:
+
+Plan Stage: Generates a .tfplan file and waits for manual approval.
+
+Apply Stage: Executes the approved plan.
+
+Drift Check: A daily cron job (3:00 AM) runs a plan to check if the manual changes were made in the Azure Portal.
+
+✍️ Authors
+Your Name - Initial Work - @YourGithub
+
+Would you like me to add a "Troubleshooting" section to this README that covers common AKS and Terraform errors?
