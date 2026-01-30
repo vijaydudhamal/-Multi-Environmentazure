@@ -1,171 +1,143 @@
-# This runs the drift check every day at 3:00 AM
+name: Terraform_MultiEnv_Pipeline
 
 schedules:
 - cron: "0 8 * * *"
   displayName: 'Daily drift detection'
   branches:
-    includes:
+    include:
     - main
-    - develope
-    exclude:
-      readme
-
-# Its automatically triger PR on manin and Dev branch
+    - develop # Fixed spelling from 'develope'
+  always: true
 
 trigger:
   branches:
-    includes:
+    include:
       - main
-      - develope
-
-# Define the variables like subscriptions
+      - develop
 
 variables:
-  azureSubscription: ''  # replace with services connection for subscription
-  #acrName: '' # replace with acr name
-  azureServiceConnection: ''
+  azureServiceConnection: 'your-service-connection-name'
   terraformVersion: '1.7.0'
-  groups: 'terraform-secrets'
-
-# in this stage terraform code will validate
+  # Note: Variable groups are usually called like this:
+  # - group: terraform-secrets 
 
 stages:
 - stage: validate
+  displayName: 'Validation'
   jobs:
   - job: terraform_validate
     pool:
-    - vmImage: 'agent-pool'
+      vmImage: 'ubuntu-latest' # Change 'agent-pool' to your actual pool name
     steps:
     - task: TerraformInstaller@1
       inputs:
-       terraformVersion: $(terraformVersion)
-    - Script: |
+        terraformVersion: $(terraformVersion)
+    - script: |
         chmod +x validate_all.sh
         ./validate_all.sh
-    displayName: 'Run Multi-Env Vallidation Script'
+      displayName: 'Run Multi-Env Validation Script'
 
-# in this stage will initialize the remote state file on the storage account
-# this will once validation completed
-
-- stage: Deploy_Dev
-  DependsOn: validate
-  condition: suceeded() 
+- stage: Dev_Deployment
+  displayName: 'Dev Deployment'
+  dependsOn: validate
+  condition: succeeded()
   jobs:
-  - deployment: Deploy_Dev
-    environment: 'developement' # Points to Azure DevOps Environment for tracking
-    pool:
-    - vmImage: 'agent-pool'
-    stratergy:
-      runOnce:
-        deploy:
-          steps:
-          - checkout: self
-          - task: TerraformTaskV4@4
-            displayName: 'terraform init (Dev)'
-            inputs:
-              provider: 'azurerm'
-              command: 'init'
-              workingDirectory: '$(system.DefaultWorkingDirectory)/environments/dev'
-              backendServiceARM: $(azureServiceConnection)
-              backendAzureRMResourceGroupname: ''
-              backendAzureRMStorageAccountName: 'stterraformstateprimary'
-              backendAzureRMContainerName: 'dev-tfstate'
-              backendAzureRMKey: 'dev_terraform.tfstate'
-
-# in this stage first task initial the backend again  
-# second task will run the terraform plan and output will save in the  tfplan file
-# Third task will save the plan file to the artifact directory
-
-
-- stage: Dev_deployment
-  jobs: 
   - job: Terraform_plan
-    displayName: 'Terraform_plan_(Dev)'
-    pool: {vmImage: 'agent-pool'}
+    displayName: 'Terraform Plan (Dev)'
+    pool:
+      vmImage: 'ubuntu-latest'
     steps:
     - checkout: self
     - task: TerraformTaskV4@4
-      inputs: 
+      displayName: 'Terraform Init'
+      inputs:
         provider: 'azurerm'
         command: 'init'
-        workingDirectory: '$(system.DefaultWorkingDirectory)/environments/dev'
-        backendServiceARM: $(azureServiceConnection)
-        backendAzureRMResourceGroupname: ''
-        backendAzureRMStorageAccountName: 'stterraformstateprimary'
-        backendAzureRMContainerName: 'dev-tfstate'
-        backendAzureRMKey: 'dev_terraform.tfstate'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/environments/dev'
+        backendServiceArm: $(azureServiceConnection)
+        backendAzureRmResourceGroupName: 'rg-terraform-state' # Ensure this is filled
+        backendAzureRmStorageAccountName: 'stterraformstateprimary'
+        backendAzureRmContainerName: 'dev-tfstate'
+        backendAzureRmKey: 'dev_terraform.tfstate'
 
-    - task: TerraformTaskV4
-      inputs: 
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Plan'
+      inputs:
         provider: 'azurerm'
         command: 'plan'
-        workingDirectory: '$(system.DefaultWorkingDirectory)/environments/dev'
-        environmentServiceConnection: $(azureServiceConnection)
-        # We save the plan output to a file
-        commandOptions: '-var-file="terraform.tfvars -out=dev.tfplan'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/environments/dev'
+        environmentServiceNameAzureRM: $(azureServiceConnection)
+        commandOptions: '-var-file="terraform.tfvars" -out=dev.tfplan'
 
     - task: PublishPipelineArtifact@1
+      displayName: 'Publish Plan Artifact'
       inputs:
-        targetPath: '$(system.DefaultWorkingDirectory)/environments/dev/dev.tfplan'
-        artifact: 'dev.tfplan'
+        targetPath: '$(System.DefaultWorkingDirectory)/environments/dev/dev.tfplan'
+        artifact: 'dev-tfplan-file'
 
-  # In this Job will apply the terraform code and provisioned the resources to azure
-  
-  # This step will download the artifact (tfplan) file from the artifact directory which created by the plan task 
-  #  first task initial the backend again    
-  # Second task will run the terraform apply and provisioned the resources to the azure
-
-  - job: Terraform_Apply
-    displayName: 'Terraform_Apply (dev)'
-    DependsOn: Terraform_plan
-    # This prevents the apply from running if the plan failed
-    condition: suceeded()
-    pool: {vmImage: 'agent-pool'}
-    stratergy:
-      runOnce:
-      deploy:
-        steps:
-        - download: current
-          artifact: 'dev-plan'
-
-        - task: TerraformTaskV4@4
-          inputs:
-            provider: 'azurerm'
-            command: 'init'
-            workingDirectory: '$system.DefaultWorkingDirectory/environments/dev'  
-            backendServiceARM: $(azureServiceConnection)
-            backendAzureRMResourceGroupname: ''
-            backendAzureRMStorageAccountName: 'stterraformstateprimary'
-            backendAzureRMContainerName: 'dev-tfstate'
-            backendAzureRMKey: 'dev_terraform.tfstate'
-
-        - task: TerraforTaskV4@4
-          displayName: 'Apply saved plan'
-          inputs:
-            provider:
-            command: 'apply'
-            workingDirectory: '$system.DefaultWorkingDirectory/environments/dev'
-            environmentServiceConnection: $(azureServiceConnection)
-            # We use the plan file instead of variables here
-            commandOptions: '$(Pipeline.Workspace)/dev/plan/dev.tfplan'
-
-
-
-
-
-
-
-                
-
-
-  
-
-
-    
-
-
-
-
-
-
+- stage: Create_PR
+  displayName: 'Auto Create Pull Request'
+  dependsOn: Dev_Deployment
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'Schedule')) # Don't PR on drift checks
+  jobs:
+  - job: Create_PR_Job
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+    - checkout: self
+      persistCredentials: true
+    - script: |
+        export AZURE_DEVOPS_EXT_PAT=$(System.AccessToken)
+        SOURCE_BRANCH=$(Build.SourceBranchName)
+        TARGET_BRANCH="main"
+        TITLE="Auto-PR: Merging $SOURCE_BRANCH into $TARGET_BRANCH"
         
+        EXISTING_PR=$(az repos pr list --source-branch $SOURCE_BRANCH --target-branch $TARGET_BRANCH --status active --query "[].pullRequestId" -o tsv)
+
+        if [ -z "$EXISTING_PR" ]; then
+          az repos pr create \
+            --source-branch $SOURCE_BRANCH \
+            --target-branch $TARGET_BRANCH \
+            --title "$TITLE" \
+            --status active
+        else
+          echo "ℹ️ PR already exists."
+        fi
+      displayName: 'Run az repos pr create'
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+- stage: Apply_Dev
+  displayName: 'Apply Dev'
+  dependsOn: Dev_Deployment
+  condition: succeeded()
+  jobs:
+  - deployment: Terraform_Apply
+    environment: 'development'
+    pool: { vmImage: 'ubuntu-latest' }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: 'dev-tfplan-file'
+
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/environments/dev'
+              backendServiceArm: $(azureServiceConnection)
+              backendAzureRmResourceGroupName: 'rg-terraform-state'
+              backendAzureRmStorageAccountName: 'stterraformstateprimary'
+              backendAzureRmContainerName: 'dev-tfstate'
+              backendAzureRmKey: 'dev_terraform.tfstate'
+
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Apply'
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/environments/dev'
+              environmentServiceNameAzureRM: $(azureServiceConnection)
+              commandOptions: '$(Pipeline.Workspace)/dev-tfplan-file/dev.tfplan'
