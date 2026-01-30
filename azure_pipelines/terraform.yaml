@@ -6,7 +6,7 @@ schedules:
   branches:
     include:
     - main
-    - develop # Fixed spelling from 'develope'
+    - develop 
   always: true
 
 trigger:
@@ -19,7 +19,7 @@ variables:
   azureServiceConnection: 'your-service-connection-name'
   terraformVersion: '1.7.0'
   # Note: Variable groups are usually called like this:
-  # - group: terraform-secrets 
+    #- group: terraform-secrets 
 
 stages:
 - stage: validate
@@ -27,7 +27,7 @@ stages:
   jobs:
   - job: terraform_validate
     pool:
-      vmImage: 'ubuntu-latest' # Change 'agent-pool' to your actual pool name
+      vmImage: 'agent-pool' # Change 'agent-pool' to your actual pool name
     steps:
     - task: TerraformInstaller@1
       inputs:
@@ -45,7 +45,7 @@ stages:
   - job: Terraform_plan
     displayName: 'Terraform Plan (Dev)'
     pool:
-      vmImage: 'ubuntu-latest'
+      vmImage: 'agent-pool'
     steps:
     - checkout: self
     - task: TerraformTaskV4@4
@@ -75,13 +75,15 @@ stages:
         targetPath: '$(System.DefaultWorkingDirectory)/environments/dev/dev.tfplan'
         artifact: 'dev-tfplan-file'
 
+# Below stage will generate auto PR on validate and plan success
+
 - stage: Create_PR
   displayName: 'Auto Create Pull Request'
   dependsOn: Dev_Deployment
   condition: and(succeeded(), ne(variables['Build.Reason'], 'Schedule')) # Don't PR on drift checks
   jobs:
   - job: Create_PR_Job
-    pool: { vmImage: 'ubuntu-latest' }
+    pool: { vmImage: 'agent-pool' }
     steps:
     - checkout: self
       persistCredentials: true
@@ -113,7 +115,7 @@ stages:
   jobs:
   - deployment: Terraform_Apply
     environment: 'development'
-    pool: { vmImage: 'ubuntu-latest' }
+    pool: { vmImage: 'agent-pool' }
     strategy:
       runOnce:
         deploy:
