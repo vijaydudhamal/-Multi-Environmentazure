@@ -113,7 +113,7 @@ stages:
   displayName: 'Auto Create Pull Request'
   jobs:
   - job: Create_PR_Job
-    pool: { vmImage: 'ubuntu-latest' }
+    pool: { vmImage: 'agent-pool' }
     steps:
     - checkout: self
       persistCredentials: true # Allows the agent to use the system token for Git commands

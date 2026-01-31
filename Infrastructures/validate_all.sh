@@ -1,17 +1,17 @@
 #!/bin/bash
 
-# Array of your environments
-ENVIRONMENTS=("dev" "qa" "prod")
+# Array of your Infrastructures/environments
+environments=("dev" "qa" "prod")
 
-echo "🚀 Starting Terraform Validation for all environments..."
+echo "🚀 Starting Terraform Validation for all Infrastructures/environments..."
 echo "-------------------------------------------------------"
 
-for ENV in "${ENVIRONMENTS[@]}"
+for ENV in "${Infrastructures/environments[@]}"
 do
     echo "Checking Environment: [$ENV]"
     
     # Navigate to the environment folder
-    cd environments/$ENV || { echo "❌ Folder environments/$ENV not found"; exit 1; }
+    cd Infrastructures/environments/$ENV || { echo "❌ Folder Infrastructures/Infrastructures/environments/$ENV not found"; exit 1; }
 
     # Initialize (quietly) to ensure provider and modules are loaded
     terraform init -backend=false -input=false > /dev/null
@@ -31,4 +31,4 @@ do
     echo "-------------------------------------------------------"
 done
 
-echo "🎉 All environments passed validation!"
+echo "🎉 All Infrastructures/environments passed validation!"

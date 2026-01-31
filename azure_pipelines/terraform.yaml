@@ -16,7 +16,7 @@ trigger:
       - develop
 
 variables:
-  azureServiceConnection: 'your-service-connection-name'
+  azureServiceConnection: 'sub-service-connection'
   terraformVersion: '1.7.0'
   # Note: Variable groups are usually called like this:
     #- group: terraform-secrets 
@@ -27,15 +27,17 @@ stages:
   jobs:
   - job: terraform_validate
     pool:
-      vmImage: 'agent-pool' # Change 'agent-pool' to your actual pool name
+      name: 'agant-pool' # Change 'agant-pool' to your actual pool name
     steps:
     - task: TerraformInstaller@1
       inputs:
         terraformVersion: $(terraformVersion)
     - script: |
+        sed -i 's/\r$//' validate_all.sh
         chmod +x validate_all.sh
         ./validate_all.sh
       displayName: 'Run Multi-Env Validation Script'
+      workingDirectory: '$(System.DefaultWorkingDirectory)'
 
 - stage: Dev_Deployment
   displayName: 'Dev Deployment'
@@ -45,21 +47,24 @@ stages:
   - job: Terraform_plan
     displayName: 'Terraform Plan (Dev)'
     pool:
-      vmImage: 'agent-pool'
+      name: 'agant-pool'
     steps:
     - checkout: self
-    - task: TerraformTaskV4@4
-      displayName: 'Terraform Init'
+
+    - task: TerraformTask@5
       inputs:
         provider: 'azurerm'
         command: 'init'
+        #commandOptions: '/environments/dev'
         workingDirectory: '$(System.DefaultWorkingDirectory)/environments/dev'
-        backendServiceArm: $(azureServiceConnection)
-        backendAzureRmResourceGroupName: 'rg-terraform-state' # Ensure this is filled
+        backendAzureRmUseEntraIdForAuthentication: false
+        backendServiceArm: 'sub-service-connection'
+        backendAzureRmOverrideSubscriptionID: 'a2b28c85-1948-4263-90ca-bade2bac4df4'
+        backendAzureRmResourceGroupName: 'azurekmlprod'
         backendAzureRmStorageAccountName: 'stterraformstateprimary'
         backendAzureRmContainerName: 'dev-tfstate'
         backendAzureRmKey: 'dev_terraform.tfstate'
-
+    
     - task: TerraformTaskV4@4
       displayName: 'Terraform Plan'
       inputs:
@@ -83,7 +88,7 @@ stages:
   condition: and(succeeded(), ne(variables['Build.Reason'], 'Schedule')) # Don't PR on drift checks
   jobs:
   - job: Create_PR_Job
-    pool: { vmImage: 'agent-pool' }
+    pool: { name: 'agant-pool' }
     steps:
     - checkout: self
       persistCredentials: true
@@ -115,7 +120,7 @@ stages:
   jobs:
   - deployment: Terraform_Apply
     environment: 'development'
-    pool: { vmImage: 'agent-pool' }
+    pool: { name: 'agant-pool' }
     strategy:
       runOnce:
         deploy:
@@ -129,12 +134,14 @@ stages:
               provider: 'azurerm'
               command: 'init'
               workingDirectory: '$(System.DefaultWorkingDirectory)/environments/dev'
-              backendServiceArm: $(azureServiceConnection)
-              backendAzureRmResourceGroupName: 'rg-terraform-state'
+              backendAzureRmUseEntraIdForAuthentication: false
+              backendServiceArm: 'sub-service-connection'
+              #backendAzureRmOverrideSubscriptionID: 'a2b28c85-1948-4263-90ca-bade2bac4df4'
+              backendAzureRmResourceGroupName: 'azurekmlprod'
               backendAzureRmStorageAccountName: 'stterraformstateprimary'
               backendAzureRmContainerName: 'dev-tfstate'
               backendAzureRmKey: 'dev_terraform.tfstate'
-
+             
           - task: TerraformTaskV4@4
             displayName: 'Terraform Apply'
             inputs:
