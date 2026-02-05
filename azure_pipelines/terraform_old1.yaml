@@ -1,0 +1,130 @@
+name: Terraform_MultiEnv_Pipeline
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+variables:
+  azureServiceConnection: 'sub-service-connection'
+  # No need for terraformVersion variable if we use the manual path
+
+stages:
+- stage: validate
+  displayName: 'Validation'
+  jobs:
+  - job: terraform_validate
+    pool:
+      name: 'agant-pool' 
+    steps:
+    - script: |
+        sed -i 's/\r$//' validate_all.sh
+        chmod +x validate_all.sh
+        ./validate_all.sh
+      displayName: 'Run Multi-Env Validation Script'
+      workingDirectory: '$(System.DefaultWorkingDirectory)'
+
+- stage: Dev_Deployment
+  displayName: 'Dev Deployment'
+  dependsOn: validate
+  condition: succeeded()
+  jobs:
+  - job: Terraform_plan
+    displayName: 'Terraform Plan (Dev)'
+    pool:
+      name: 'agant-pool'
+    steps:
+    - checkout: self
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Init'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        # FORCE THE PATH HERE
+        terraformPath: '/usr/local/bin/terraform'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/environments/dev'
+        backendServiceArm: $(azureServiceConnection)
+        backendAzureRmResourceGroupName: 'azurekmlprod'
+        backendAzureRmStorageAccountName: 'stterraformstateprimary'
+        backendAzureRmContainerName: 'dev-tfstate'
+        backendAzureRmKey: 'dev_terraform.tfstate'
+    
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Plan'
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        terraformPath: '/usr/local/bin/terraform'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/environments/dev'
+        environmentServiceNameAzureRM: $(azureServiceConnection)
+        commandOptions: '-var-file="terraform.tfvars" -out=dev.tfplan'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Plan Artifact'
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)/environments/dev/dev.tfplan'
+        artifact: 'dev-tfplan-file'
+
+- stage: Create_PR
+  displayName: 'Auto Create Pull Request'
+  dependsOn: Dev_Deployment
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'Schedule'))
+  jobs:
+  - job: Create_PR_Job
+    pool: { name: 'agant-pool' }
+    steps:
+    - checkout: self
+      persistCredentials: true
+    - script: |
+        export AZURE_DEVOPS_EXT_PAT=$(System.AccessToken)
+        SOURCE_BRANCH=$(Build.SourceBranchName)
+        TARGET_BRANCH="main"
+        
+        EXISTING_PR=$(az repos pr list --source-branch $SOURCE_BRANCH --target-branch $TARGET_BRANCH --status active --query "[].pullRequestId" -o tsv)
+
+        if [ -z "$EXISTING_PR" ]; then
+          az repos pr create --source-branch $SOURCE_BRANCH --target-branch $TARGET_BRANCH --title "Auto-PR: $SOURCE_BRANCH" --status active
+        fi
+      displayName: 'Run az repos pr create'
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+- stage: Apply_Dev
+  displayName: 'Apply Dev'
+  dependsOn: Dev_Deployment
+  condition: succeeded()
+  jobs:
+  - deployment: Terraform_Apply
+    environment: 'development'
+    pool: { name: 'agant-pool' }
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: 'dev-tfplan-file'
+
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              terraformPath: '/usr/local/bin/terraform'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/environments/dev'
+              backendServiceArm: $(azureServiceConnection)
+              backendAzureRmResourceGroupName: 'azurekmlprod'
+              backendAzureRmStorageAccountName: 'stterraformstateprimary'
+              backendAzureRmContainerName: 'dev-tfstate'
+              backendAzureRmKey: 'dev_terraform.tfstate'
+             
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Apply'
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              terraformPath: '/usr/local/bin/terraform'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/environments/dev'
+              environmentServiceNameAzureRM: $(azureServiceConnection)
+              commandOptions: '$(Pipeline.Workspace)/dev-tfplan-file/dev.tfplan'
